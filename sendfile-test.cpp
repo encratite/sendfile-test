@@ -1,27 +1,31 @@
 #include <iostream>
 #include <string>
 
+#include <stdlib.h>
+
+#include <errno.h>
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
 #include <sys/sendfile.h>
 
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <pthread.h>
 #include <fcntl.h>
 
 class SendFileTest
 {
 public:
-	SendFileTest(std::string const & serverSocketPath, std::string const & testFilePath);
+	SendFileTest(short port, std::string const & testFilePath);
 	bool runTest();
 	
 private:
-	std::string
-		serverSocketPath,
-		testFilePath;
+	short port;
+	std::string testFilePath;
 		
-	sockaddr_un serverAddress;
+	sockaddr_in serverAddress;
 	
 	size_t fileSize;
 		
@@ -29,8 +33,8 @@ private:
 	bool runClient();
 };
 
-SendFileTest::SendFileTest(std::string const & serverSocketPath, std::string const & testFilePath):
-	serverSocketPath(serverSocketPath),
+SendFileTest::SendFileTest(short port, std::string const & testFilePath):
+	port(port),
 	testFilePath(testFilePath)
 {
 }
@@ -45,19 +49,20 @@ void * SendFileTest::clientThreadHandler(void * argument)
 
 bool SendFileTest::runTest()
 {
-	unlink(serverSocketPath.c_str());
-	int serverSocket = socket(AF_UNIX, SOCK_STREAM, 0);
+	int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 	if(serverSocket == -1)
 	{
-		std::cout << "Failed to create the UNIX server socket" << std::endl;
+		std::cout << "Failed to create the TCP IPv4 server socket" << std::endl;
 		return false;
 	}
-	serverAddress.sun_family = PF_UNIX;
-	strcpy(serverAddress.sun_path, serverSocketPath.c_str());
+	serverAddress.sin_family = PF_INET;
+	serverAddress.sin_port = htons(port);
+	serverAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
+
 	int result = bind(serverSocket, reinterpret_cast<sockaddr *>(&serverAddress), sizeof(serverAddress));
 	if(result == -1)
 	{
-		std::cout << "Failed to bind the UNIX server socket" << std::endl;
+		std::cout << "Failed to bind the TCP IPv4 server socket to port " << port << std::endl;
 		return false;
 	}
 	
@@ -95,7 +100,7 @@ bool SendFileTest::runTest()
 		return false;
 	}
 	
-	sockaddr_un clientAddress;
+	sockaddr_in clientAddress;
 	socklen_t clientSize;
 	int clientSocket = accept(serverSocket, reinterpret_cast<sockaddr *>(&clientAddress), &clientSize);
 	if(clientSocket == -1)
@@ -120,17 +125,17 @@ bool SendFileTest::runTest()
 
 bool SendFileTest::runClient()
 {
-	int clientSocket = socket(AF_UNIX, SOCK_STREAM, 0);
+	int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
 	if(clientSocket == -1)
 	{
-		std::cout << "Failed to create the UNIX client socket" << std::endl;
+		std::cout << "Failed to create the TCP IPv4 client socket" << std::endl;
 		return false;
 	}
 	
 	int result = connect(clientSocket, reinterpret_cast<sockaddr *>(&serverAddress), sizeof(serverAddress));
 	if(result == -1)
 	{
-		std::cout << "Failed to connect to the UNIX server socket" << std::endl;
+		std::cout << "Failed to connect to the TCP IPv4 server on port " << port << std::endl;
 		return false;
 	}
 	
@@ -156,15 +161,14 @@ int main(int argc, char ** argv)
 	if(argc != 3)
 	{
 		std::cout << "Usage:" << std::endl;
-		std::cout << argv[0] << " <name of the server socket to be used> <path to file to run the test on>" << std::endl;
+		std::cout << argv[0] << " <TCP port of the local server> <path to file to run the test on>" << std::endl;
 		return 1;
 	}
 	
-	std::string
-		serverSocketPath = argv[1],
-		testFilePath = argv[2];
+	int port = atoi(argv[1]);
+	std::string testFilePath = argv[2];
 		
-	SendFileTest test(serverSocketPath, testFilePath);
+	SendFileTest test(port, testFilePath);
 	bool success = test.runTest();
 	return success ? 0 : 1;
 }
